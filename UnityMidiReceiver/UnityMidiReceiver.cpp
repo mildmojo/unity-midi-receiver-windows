@@ -36,7 +36,8 @@ namespace
     static_assert(sizeof(Message) == sizeof(uint64_t), "Wrong data size.");
 
     // MIDI device handle vector.
-    std::vector<HMIDIIN> handles;
+	std::vector<HMIDIIN> handles;
+	std::vector<HMIDIOUT> outDeviceHandles;
 
     // Incoming MIDI message queue.
     std::queue<Message> messageQueue;
@@ -86,6 +87,18 @@ namespace
 
             handles.push_back(handle);
         }
+
+		auto outDeviceCount = midiOutGetNumDevs();
+		for (auto i = 0U; i < outDeviceCount; i++)
+		{
+			HMIDIOUT handle;
+			DWORD_PTR callback = reinterpret_cast<DWORD_PTR>(MyMidiInProc);
+			// DWORD_PTR instance = reinterpret_cast<DWORD_PTR>(&messageDelegate);
+			MMRESULT result = midiOutOpen(&handle, i, callback, NULL, CALLBACK_FUNCTION);
+			assert(result == MMSYSERR_NOERROR);
+
+			outDeviceHandles.push_back(handle);
+		}
     }
 }
 
@@ -145,4 +158,25 @@ extern "C" uint64_t EXPORT_API UnityMIDIReceiver_DequeueIncomingData()
     messageQueueLock.unlock();
 
     return m.uint64Value;
+}
+
+// BOOKMARK
+extern "C" void EXPORT_API UnityMIDIReceiver_Send(uint8_t aStatus, uint8_t aData1, uint8_t aData2)
+{
+	std::string errorString;
+	MMRESULT result;
+
+	// Pack MIDI bytes into double word.
+	DWORD packet;
+	unsigned char *ptr = (unsigned char *)&packet;
+	ptr[0] = aStatus;
+	ptr[1] = aData1;
+	ptr[2] = aData2;
+
+	// Send the message immediately.
+	for (auto& handle : outDeviceHandles)
+	{
+		result = midiOutShortMsg(handle, packet);
+		assert(result == MMSYSERR_NOERROR);
+	}
 }
